@@ -1,0 +1,28 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="smenazhanra"
+version="${file.jarVersion}"
+displayName="Смена жанра"
+authors="shadowexile1980"
+description='''
+Раз в 20 минут Minecraft на пару минут превращается в другую игру:
+визуальную новеллу, суд, ритм-игру, викторину или файтинг.
+Результат мини-игры влияет на мир!
+'''
+
+[[dependencies.smenazhanra]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.smenazhanra]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"

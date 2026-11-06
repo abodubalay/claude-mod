@@ -1,0 +1,7 @@
+{
+  "channel_switch": { "subtitle": "subtitles.smenazhanra.channel_switch", "sounds": ["smenazhanra:channel_switch"] },
+  "applause":       { "subtitle": "subtitles.smenazhanra.applause",       "sounds": ["smenazhanra:applause"] },
+  "gavel":          { "subtitle": "subtitles.smenazhanra.gavel",          "sounds": ["smenazhanra:gavel"] },
+  "buzzer":         { "subtitle": "subtitles.smenazhanra.buzzer",         "sounds": ["smenazhanra:buzzer"] },
+  "correct":        { "subtitle": "subtitles.smenazhanra.correct",        "sounds": ["smenazhanra:correct"] }
+}
