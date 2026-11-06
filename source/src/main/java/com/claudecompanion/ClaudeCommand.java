@@ -16,6 +16,7 @@ import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -43,8 +44,16 @@ public final class ClaudeCommand {
         d.register(Commands.literal("claude")
                 .executes(ClaudeCommand::help)
                 .then(Commands.literal("summon").requires(ClaudeCommand::isAdmin)
-                        .executes(c -> summon(c, "claude"))
-                        .then(ai().executes(c -> summon(c, StringArgumentType.getString(c, "ai")))))
+                        .executes(c -> summon(c, "claude", null))
+                        .then(ai().executes(c -> summon(c, StringArgumentType.getString(c, "ai"), null))
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(c -> summon(c, StringArgumentType.getString(c, "ai"), EntityArgument.getPlayer(c, "player"))))))
+                .then(Commands.literal("inv")
+                        .executes(c -> inventory(c, null))
+                        .then(ai().executes(c -> inventory(c, StringArgumentType.getString(c, "ai")))))
+                .then(Commands.literal("transfer")
+                        .then(ai().then(Commands.argument("player", EntityArgument.player())
+                                .executes(ClaudeCommand::transfer))))
                 .then(Commands.literal("dismiss")
                         .executes(c -> dismiss(c, null))
                         .then(ai().executes(c -> dismiss(c, StringArgumentType.getString(c, "ai")))))
@@ -99,7 +108,9 @@ public final class ClaudeCommand {
         reply(c.getSource(), """
                 §6Напарники-нейросети§r (claude, deepseek, grok, chatgpt, gemini)
                 /claude key <нейросеть> <ключ> — задать ключ (виден только тебе)
-                /claude summon <нейросеть> — призвать (или позвать к себе)
+                /claude summon <нейросеть> [ник] — призвать себе или игроку (он станет хозяином)
+                /claude inv [нейросеть] — инвентарь своего напарника
+                /claude transfer <нейросеть> <ник> — передать напарника
                 /claude list — все нейросети: ключ, сервер, модель
                 /claude stop — остановить всех;  /claude dismiss [нейросеть] — отпустить
                 /claude url <нейросеть> https://... — адрес сервера (reset — стандартный)
@@ -113,9 +124,11 @@ public final class ClaudeCommand {
 
     // ---------- напарники ----------
 
-    private static int summon(CommandContext<CommandSourceStack> c, String id) {
-        ServerPlayer p = c.getSource().getPlayer();
-        if (p == null) { reply(c.getSource(), "Команду нужно вводить в игре."); return 0; }
+    /** Призвать напарника. target — для кого (он станет хозяином); null — для себя. */
+    private static int summon(CommandContext<CommandSourceStack> c, String id, ServerPlayer target) {
+        ServerPlayer p = target != null ? target : c.getSource().getPlayer();
+        if (p == null) { reply(c.getSource(), "Укажи игрока: /claude summon " + id + " <ник>"); return 0; }
+        boolean forOther = c.getSource().getPlayer() != p;
         Settings cfg = Settings.get();
         Settings.Profile prof = cfg.find(id);
         if (prof == null) {
@@ -127,7 +140,8 @@ public final class ClaudeCommand {
             if (!pid.equals(e.getProfileId())) continue;
             if (e.level() == p.level()) e.teleportTo(p.getX(), p.getY(), p.getZ());
             else e.changeDimension(p.serverLevel(), new net.minecraftforge.common.util.ITeleporter() {});
-            reply(c.getSource(), prof.name + " уже здесь — позвал к тебе.");
+            reply(c.getSource(), forOther ? prof.name + " у игрока " + p.getGameProfile().getName() + " уже есть — позвал к нему."
+                    : prof.name + " уже здесь — позвал к тебе.");
             return 1;
         }
         CompanionEntity e = ClaudeCompanion.COMPANION.get().create(p.serverLevel());
@@ -136,8 +150,14 @@ public final class ClaudeCommand {
         e.setOwner(p.getUUID());
         e.setProfile(pid);
         p.serverLevel().addFreshEntity(e);
+        if (forOther) {
+            reply(c.getSource(), "§a" + prof.name + " призван для " + p.getGameProfile().getName() + " — теперь это его напарник.");
+            p.sendSystemMessage(Component.literal("§a" + prof.name + " теперь твой напарник! Пиши ему в чат по имени («"
+                    + (prof.names.isEmpty() ? prof.name : prof.names.get(prof.names.size() > 1 ? 1 : 0)) + ", …»). Инвентарь: /claude inv, ПКМ по нему."));
+        }
         if (prof.hasKey()) {
-            BrainManager.notify(e, "[событие] Тебя только что призвал " + p.getGameProfile().getName() + ". Поздоровайся коротко и иди за ним.");
+            BrainManager.notify(e, "[событие] Тебя только что призвали для игрока " + p.getGameProfile().getName()
+                    + " — он твой хозяин. Поздоровайся с ним коротко и иди за ним.");
         } else {
             reply(c.getSource(), "§e" + prof.name + " призван, но ему нужен ключ: /claude key " + pid + " <ключ>");
         }
@@ -161,6 +181,52 @@ public final class ClaudeCommand {
         }
         reply(c.getSource(), n == 0 ? "Таких напарников у тебя нет." : "Отпустил: " + n + ". Их вещи остались на земле.");
         return n;
+    }
+
+    /** Найти своего напарника (по нейросети или первого). */
+    private static CompanionEntity myCompanion(ServerPlayer p, String id) {
+        String pid = null;
+        if (id != null) {
+            Settings.Profile prof = Settings.get().find(id);
+            if (prof == null) return null;
+            pid = Settings.get().idOf(prof);
+        }
+        for (CompanionEntity e : BrainManager.ownedBy(p.getUUID()))
+            if (pid == null || pid.equals(e.getProfileId())) return e;
+        return null;
+    }
+
+    /** Открыть инвентарь своего напарника, даже издалека. */
+    private static int inventory(CommandContext<CommandSourceStack> c, String id) {
+        ServerPlayer p = c.getSource().getPlayer();
+        if (p == null) return 0;
+        CompanionEntity e = myCompanion(p, id);
+        if (e == null) { reply(c.getSource(), "У тебя нет такого напарника."); return 0; }
+        e.openInventoryFor(p);
+        return 1;
+    }
+
+    /** Передать своего напарника другому игроку. */
+    private static int transfer(CommandContext<CommandSourceStack> c) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer p = c.getSource().getPlayer();
+        if (p == null) return 0;
+        ServerPlayer to = EntityArgument.getPlayer(c, "player");
+        CompanionEntity e = myCompanion(p, StringArgumentType.getString(c, "ai"));
+        if (e == null) { reply(c.getSource(), "У тебя нет такого напарника."); return 0; }
+        for (CompanionEntity other : BrainManager.ownedBy(to.getUUID()))
+            if (other.getProfileId().equals(e.getProfileId())) {
+                reply(c.getSource(), "§cУ " + to.getGameProfile().getName() + " уже есть " + e.displayName() + ".");
+                return 0;
+            }
+        e.stopAll();
+        e.setOwner(to.getUUID());
+        e.setFollowTarget(to.getUUID());
+        reply(c.getSource(), "§a" + e.displayName() + " теперь напарник " + to.getGameProfile().getName() + ".");
+        to.sendSystemMessage(Component.literal("§a" + p.getGameProfile().getName() + " передал тебе напарника " + e.displayName()
+                + ". Пиши ему в чат по имени, инвентарь — /claude inv."));
+        BrainManager.notify(e, "[событие] Теперь твой хозяин — " + to.getGameProfile().getName()
+                + " (тебя передал " + p.getGameProfile().getName() + "). Поздоровайся с новым хозяином и иди за ним.");
+        return 1;
     }
 
     private static int stop(CommandContext<CommandSourceStack> c) {

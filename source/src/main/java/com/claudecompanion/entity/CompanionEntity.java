@@ -215,12 +215,17 @@ public class CompanionEntity extends PathfinderMob {
     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
         // ПКМ хозяина — открыть инвентарь напарника
         if (!level().isClientSide && isOwner(player) && player instanceof ServerPlayer sp) {
-            sp.openMenu(new SimpleMenuProvider(
-                    (id, inv, p) -> new ChestMenu(MenuType.GENERIC_9x4, id, inv, inventory, 4),
-                    Component.literal("Инвентарь " + displayName())));
+            openInventoryFor(sp);
             return InteractionResult.SUCCESS;
         }
         return super.mobInteract(player, hand);
+    }
+
+    /** Открыть инвентарь напарника игроку (хозяину). */
+    public void openInventoryFor(ServerPlayer sp) {
+        sp.openMenu(new SimpleMenuProvider(
+                (id, inv, p) -> new ChestMenu(MenuType.GENERIC_9x4, id, inv, inventory, 4),
+                Component.literal("Инвентарь " + displayName())));
     }
 
     @Override
