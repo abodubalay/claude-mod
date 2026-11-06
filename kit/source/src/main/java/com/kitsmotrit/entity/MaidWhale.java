@@ -3,6 +3,7 @@ package com.kitsmotrit.entity;
 import com.kitsmotrit.Chat;
 import com.kitsmotrit.KitConfig;
 import com.kitsmotrit.KitMod;
+import com.kitsmotrit.Phrases;
 import com.kitsmotrit.Simpatia;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -50,18 +51,11 @@ public class MaidWhale extends Mob {
     private static final EntityDataAccessor<Integer> WAVE_UNTIL = SynchedEntityData.defineId(MaidWhale.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> SCALE = SynchedEntityData.defineId(MaidWhale.class, EntityDataSerializers.FLOAT);
 
-    private static final String[] SHY_PHRASES = {
-            "Н-не смотри на меня так!",
-            "Я вовсе не за тобой следил! Просто мимо проплывал!",
-            "Б-бака!",
-            "Это не потому, что ты мне нравишься, понял?!",
-            "Хмф! Подумаешь..."
-    };
-    private static final String ACQUAINTANCE = "Т-ты опять здесь? Ну... ладно, можешь остаться.";
-    private static final String FRIEND = "Я тут... просто проверить, не голодный ли ты";
 
     @Nullable private UUID owner;
-    private double hoverHeight = 27;
+    private double hoverHeight = 14;
+    /** Кружит вокруг игрока: угол и расстояние по горизонтали. */
+    private double orbitAngle, orbitDistance = 18;
     private int stayTicks = 600;
     private int gazeTicks, punchCooldown, blushHoldTicks, fidgetTicks;
     @Nullable private String shyPhrase;
@@ -157,11 +151,14 @@ public class MaidWhale extends Mob {
         w.owner = p.getUUID();
         w.entityData.set(SCALE, KitConfig.WHALE_SCALE.get().floatValue());
         w.refreshDimensions();
-        w.hoverHeight = 25 + lvl.random.nextDouble() * 5;
+        w.hoverHeight = 9 + lvl.random.nextDouble() * 3;       // ниже — чтобы хорошо было видно
+        w.orbitDistance = 18 + lvl.random.nextDouble() * 6;    // и чуть в стороне, а не прямо над головой
+        w.orbitAngle = lvl.random.nextDouble() * Math.PI * 2;
         int stay = KitConfig.STAY_MIN.get() + lvl.random.nextInt(Math.max(1, KitConfig.STAY_MAX.get() - KitConfig.STAY_MIN.get() + 1));
         w.stayTicks = Math.min(KitConfig.STAY_MAX_TOTAL.get(), stay + 5 * simp) * 20;
         float yaw = lvl.random.nextFloat() * 360f;
-        w.moveTo(p.getX(), p.getY() + w.hoverHeight, p.getZ(), yaw, 0);
+        w.moveTo(p.getX() + Math.cos(w.orbitAngle) * w.orbitDistance, p.getY() + w.hoverHeight,
+                p.getZ() + Math.sin(w.orbitAngle) * w.orbitDistance, yaw, 0);
         w.targetYaw = yaw;
         w.setYBodyRot(yaw);
         w.setYHeadRot(yaw);
@@ -174,11 +171,8 @@ public class MaidWhale extends Mob {
     }
 
     private void greet(ServerPlayer p, int simp) {
-        List<String> pool = new ArrayList<>(List.of("..."));
         int lvl = Simpatia.level(simp);
-        if (lvl >= 1) pool.add(ACQUAINTANCE);
-        if (lvl >= 2) pool.add(FRIEND);
-        Chat.whale(p, pool.get(random.nextInt(pool.size())));
+        Chat.whale(p, Phrases.next(p.getUUID(), "greet", Phrases.greetPool(lvl)));
         if (lvl >= 2 && random.nextFloat() < 0.5f) { // «Друг»: иногда сам роняет еду
             ItemStack[] food = {new ItemStack(Items.COOKED_COD, 3), new ItemStack(Items.COOKED_SALMON, 2), new ItemStack(Items.BREAD, 3)};
             dropOnPlayer(p, food[random.nextInt(food.length)]);
@@ -239,16 +233,22 @@ public class MaidWhale extends Mob {
         // движение задаём сами — без трения и падения
     }
 
-    /** Висит над игроком и плывёт за ним, оставаясь над головой. */
+    /** Медленно кружит вокруг игрока чуть в стороне и плывёт за ним — боком к игроку, чтобы было хорошо видно. */
     private void follow(Player p, double speed) {
-        Vec3 target = new Vec3(p.getX(), p.getY() + hoverHeight, p.getZ());
+        orbitAngle += 0.0035; // один круг примерно за полторы минуты
+        Vec3 target = new Vec3(p.getX() + Math.cos(orbitAngle) * orbitDistance, p.getY() + hoverHeight,
+                p.getZ() + Math.sin(orbitAngle) * orbitDistance);
         Vec3 d = target.subtract(position());
         Vec3 step = d.scale(speed);
         if (step.length() > 0.45) step = step.normalize().scale(0.45);
         setPos(getX() + step.x, getY() + step.y, getZ() + step.z);
-        double horiz = Math.sqrt(d.x * d.x + d.z * d.z);
-        if (horiz > 3) targetYaw = (float) (Mth.atan2(d.z, d.x) * Mth.RAD_TO_DEG) - 90f; // плывёт головой вперёд
-        else targetYaw += 0.15f; // медленно кружит над головой
+        if (d.length() > 8) {
+            targetYaw = (float) (Mth.atan2(d.z, d.x) * Mth.RAD_TO_DEG) - 90f; // догоняет головой вперёд
+        } else {
+            // плывёт по кругу: нос по касательной, бок к игроку
+            double tx = -Math.sin(orbitAngle), tz = Math.cos(orbitAngle);
+            targetYaw = (float) (Mth.atan2(tz, tx) * Mth.RAD_TO_DEG) - 90f;
+        }
     }
 
     private void turnBody() {
@@ -309,10 +309,7 @@ public class MaidWhale extends Mob {
     public void startShy(ServerPlayer p, @Nullable String phrase) {
         int simp = Simpatia.get(p);
         if (phrase == null) {
-            List<String> pool = new ArrayList<>(List.of(SHY_PHRASES));
-            if (Simpatia.level(simp) >= 1) pool.add(ACQUAINTANCE);
-            if (Simpatia.level(simp) >= 2) pool.add(FRIEND);
-            phrase = pool.get(random.nextInt(pool.size()));
+            phrase = Phrases.next(p.getUUID(), "shy", Phrases.shyPool(Simpatia.level(simp)));
         }
         shyPhrase = phrase;
         fidgetTicks = simp >= 3 ? 40 : 0; // на 3+ ещё 2 секунды «мнётся», пряча глаза
@@ -343,8 +340,8 @@ public class MaidWhale extends Mob {
     /** Через 30–60 с без взгляда: медленно и спокойно уплывает. */
     private void startLeave(@Nullable ServerPlayer p) {
         if (p != null) Chat.whale(p, Simpatia.level(Simpatia.get(p)) >= 3
-                ? "П-пока... Береги себя, бака."
-                : "...Я ещё вернусь. Н-не потому что хочу!");
+                ? Phrases.BEST_FRIEND_LEAVE
+                : Phrases.next(p.getUUID(), "leave", Phrases.LEAVE));
         setState(LEAVE);
     }
 
@@ -366,7 +363,7 @@ public class MaidWhale extends Mob {
         entityData.set(BLUSH, Math.min(1f, getBlush() + 0.6f));
         blushHoldTicks = 40;
         entityData.set(EYES_WIDE, true);
-        Chat.whale(p, "Ч-что ты делаешь, идиот?!");
+        Chat.whale(p, Phrases.next(p.getUUID(), "punch", Phrases.PUNCH));
         Simpatia.set(p, Simpatia.get(p) - 1);
         playSound(net.minecraft.sounds.SoundEvents.DOLPHIN_HURT, 2f, 0.6f);
         ((ServerLevel) level()).sendParticles(ParticleTypes.ANGRY_VILLAGER, headPos().x, headPos().y + 1.5, headPos().z, 3, 1, 0.5, 1, 0);
@@ -380,12 +377,12 @@ public class MaidWhale extends Mob {
         int before = Simpatia.get(p);
         Simpatia.set(p, before + 1);
         if (Simpatia.level(before + 1) > Simpatia.level(before)) // новый уровень симпатии
-            Chat.whale(p, "...Хм! Ты мне не нравишься! Совсем!");
+            Chat.whale(p, Phrases.LEVEL_UP);
         entityData.set(PURPLE, true);
         entityData.set(BLUSH, 1f);
         dropOnPlayer(p, new ItemStack(Items.CAKE));
         ((ServerLevel) level()).sendParticles(ParticleTypes.HEART, headPos().x, headPos().y + 1, headPos().z, 15, 2, 1, 2, 0);
-        startShy(p, "Э-это просто так! Не придумывай!");
+        startShy(p, Phrases.FLOWER);
     }
 
     // ---------- неуязвим, ничего не трогает ----------
