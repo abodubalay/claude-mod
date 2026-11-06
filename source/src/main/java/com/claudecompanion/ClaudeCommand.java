@@ -172,10 +172,7 @@ public final class ClaudeCommand {
         int n = 0;
         for (CompanionEntity e : BrainManager.ownedBy(p.getUUID())) {
             if (pid != null && !pid.equals(e.getProfileId())) continue;
-            for (int i = 0; i < e.inventory.getContainerSize(); i++) {
-                var s = e.inventory.removeItemNoUpdate(i);
-                if (!s.isEmpty()) e.spawnAtLocation(s);
-            }
+            e.dropEverything();
             e.discard();
             n++;
         }

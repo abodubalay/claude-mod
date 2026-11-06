@@ -1,7 +1,10 @@
 package com.claudecompanion.entity;
 
 import com.claudecompanion.brain.BrainManager;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
@@ -85,11 +88,15 @@ public class CompanionEntity extends PathfinderMob {
 
     public String displayName() { return getName().getString(); }
 
+    /** Вдвое крепче и сильнее игрока: 40 здоровья (20 сердец) и 4 урона рукой. */
+    public static final double MAX_HEALTH = 40.0;
+    public static final double ATTACK_DAMAGE = 4.0;
+
     public static AttributeSupplier.Builder createAttributes() {
         return Mob.createMobAttributes()
-                .add(Attributes.MAX_HEALTH, 20.0)
+                .add(Attributes.MAX_HEALTH, MAX_HEALTH)
                 .add(Attributes.MOVEMENT_SPEED, 0.32)
-                .add(Attributes.ATTACK_DAMAGE, 2.0)
+                .add(Attributes.ATTACK_DAMAGE, ATTACK_DAMAGE)
                 .add(Attributes.FOLLOW_RANGE, 48.0);
     }
 
@@ -158,6 +165,7 @@ public class CompanionEntity extends PathfinderMob {
         super.aiStep();
         if (level().isClientSide) return;
 
+        if (isDeadOrDying()) return; // мёртвый не подбирает (иначе он «съедал» свой же дроп)
         pickUpNearbyItems();
 
         if (task != null) {
@@ -176,7 +184,7 @@ public class CompanionEntity extends PathfinderMob {
 
         // медленная регенерация и автоеда
         if (tickCount % 80 == 0 && getHealth() < getMaxHealth()) heal(1.0f);
-        if (tickCount % 40 == 0 && getHealth() < 10) Actions.eatBest(this);
+        if (tickCount % 40 == 0 && getHealth() < getMaxHealth() / 2) Actions.eatBest(this);
     }
 
     private void tickFollow() {
@@ -236,7 +244,7 @@ public class CompanionEntity extends PathfinderMob {
             if (attacker != null && !isOwner(attacker)) {
                 lastHurtNotify = tickCount;
                 BrainManager.notify(this, "[событие] Тебя атакует " + Actions.entityName(attacker)
-                        + "! Здоровье " + Math.round(getHealth()) + "/20.");
+                        + "! Здоровье " + Math.round(getHealth()) + "/" + Math.round(getMaxHealth()) + ".");
             }
         }
         return r;
@@ -244,18 +252,67 @@ public class CompanionEntity extends PathfinderMob {
 
     @Override
     public void die(DamageSource source) {
-        if (!level().isClientSide) {
+        if (!level().isClientSide && !isRemoved() && !dead) {
             ServerPlayer o = getOwnerPlayer();
-            if (o != null) o.sendSystemMessage(Component.literal("§c" + displayName() + " погиб: " + source.getLocalizedDeathMessage(this).getString()
-                    + ". Его вещи выпали. Призови снова: /claude summon " + getProfileId()));
+            String why = source.getLocalizedDeathMessage(this).getString();
+            BlockPos p = blockPosition();
+            String where = p.getX() + " " + p.getY() + " " + p.getZ() + " (" + level().dimension().location().getPath() + ")";
+            boolean keep = level().getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
+            if (keep) {
+                // keepInventory: запоминаем всё и сразу возрождаемся рядом с хозяином, ничего не выпадает
+                CompoundTag snapshot = saveWithoutId(new CompoundTag());
+                for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values())
+                    setItemSlot(slot, ItemStack.EMPTY);
+                inventory.clearContent();
+                MinecraftServer server = getServer();
+                net.minecraft.resources.ResourceKey<Level> dim = level().dimension();
+                if (server != null) server.execute(() -> respawn(server, snapshot, dim));
+                if (o != null) o.sendSystemMessage(Component.literal("§e" + displayName() + " погиб (" + why + ") на " + where
+                        + ". keepInventory включён — он возродился рядом с тобой со всеми вещами."));
+            } else if (o != null) {
+                o.sendSystemMessage(Component.literal("§c" + displayName() + " погиб: " + why
+                        + ". §eЕго вещи лежат тут: " + where + "§c. Призови снова: /claude summon " + getProfileId()));
+            }
             BrainManager.remove(this);
         }
         super.die(source);
     }
 
+    /** Возродить напарника из сохранённых данных (для keepInventory): рядом с хозяином или на точке спавна. */
+    private static void respawn(MinecraftServer server, CompoundTag snapshot, net.minecraft.resources.ResourceKey<Level> dim) {
+        for (String k : new String[]{"UUID", "Health", "DeathTime", "HurtTime", "HurtByTimestamp", "Fire", "Motion", "FallDistance", "Air", "ActiveEffects"})
+            snapshot.remove(k);
+        UUID ownerId = snapshot.hasUUID("Owner") ? snapshot.getUUID("Owner") : null;
+        ServerPlayer o = ownerId == null ? null : server.getPlayerList().getPlayer(ownerId);
+        net.minecraft.server.level.ServerLevel level = o != null ? o.serverLevel() : server.getLevel(dim);
+        if (level == null) level = server.overworld();
+        CompanionEntity e = com.claudecompanion.ClaudeCompanion.COMPANION.get().create(level);
+        if (e == null) return;
+        e.load(snapshot);
+        e.setUUID(UUID.randomUUID());
+        BlockPos at = o != null ? o.blockPosition() : level.getSharedSpawnPos();
+        e.moveTo(at.getX() + 0.5, at.getY(), at.getZ() + 0.5, 0, 0);
+        e.setHealth(e.getMaxHealth());
+        e.setTarget(null);
+        level.addFreshEntity(e);
+        BrainManager.notify(e, "[событие] Ты погиб и возродился рядом с хозяином со всеми вещами (keepInventory). Коротко скажи об этом.");
+    }
+
     @Override
     protected void dropCustomDeathLoot(DamageSource source, int looting, boolean recentlyHit) {
-        super.dropCustomDeathLoot(source, looting, recentlyHit);
+        // не вызываем super: там броня и предметы в руках выпадают лишь с маленьким шансом
+        dropEverything();
+    }
+
+    /** Выбросить на землю всё: броню, предметы в руках и инвентарь. */
+    public void dropEverything() {
+        for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+            ItemStack s = getItemBySlot(slot);
+            if (!s.isEmpty()) {
+                spawnAtLocation(s.copy());
+                setItemSlot(slot, ItemStack.EMPTY);
+            }
+        }
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack s = inventory.removeItemNoUpdate(i);
             if (!s.isEmpty()) spawnAtLocation(s);
@@ -294,6 +351,10 @@ public class CompanionEntity extends PathfinderMob {
         owner = tag.hasUUID("Owner") ? tag.getUUID("Owner") : null;
         followTarget = tag.hasUUID("Follow") ? tag.getUUID("Follow") : null;
         guard = tag.getBoolean("Guard");
+        var hp = getAttribute(Attributes.MAX_HEALTH);
+        if (hp != null && hp.getBaseValue() < MAX_HEALTH) hp.setBaseValue(MAX_HEALTH);
+        var dmg = getAttribute(Attributes.ATTACK_DAMAGE);
+        if (dmg != null && dmg.getBaseValue() < ATTACK_DAMAGE) dmg.setBaseValue(ATTACK_DAMAGE);
         if (tag.contains("Profile")) setProfile(tag.getString("Profile"));
         memory.clear();
         ListTag mem = tag.getList("Memory", Tag.TAG_STRING);

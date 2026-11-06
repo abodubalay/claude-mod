@@ -222,7 +222,7 @@ public final class Actions {
         e.inventory.setChanged();
         e.heal(bestFood);
         e.playSound(net.minecraft.sounds.SoundEvents.GENERIC_EAT, 1.0f, 1.0f);
-        return "Съел " + name + ". Здоровье " + Math.round(e.getHealth()) + "/20.";
+        return "Съел " + name + ". Здоровье " + Math.round(e.getHealth()) + "/" + Math.round(e.getMaxHealth()) + ".";
     }
 
     // ================= статус =================
@@ -236,7 +236,7 @@ public final class Actions {
         sb.append("Позиция: ").append(p.getX()).append(' ').append(p.getY()).append(' ').append(p.getZ())
                 .append(" (").append(lvl.dimension().location()).append(", биом ")
                 .append(lvl.getBiome(p).unwrapKey().map(k -> k.location().toString()).orElse("?")).append(")\n");
-        sb.append("Здоровье: ").append(Math.round(e.getHealth())).append("/20\n");
+        sb.append("Здоровье: ").append(Math.round(e.getHealth())).append("/" + Math.round(e.getMaxHealth()) + "\n");
         sb.append("Время: ").append(day ? "день" : "ночь").append(" (").append(time).append("), ")
                 .append(lvl.isThundering() ? "гроза" : lvl.isRaining() ? "дождь" : "ясно").append('\n');
         sb.append("В руке: ").append(e.getMainHandItem().isEmpty() ? "ничего" : id(e.getMainHandItem().getItem()));
@@ -252,7 +252,7 @@ public final class Actions {
             sb.append("Хозяин ").append(o.getGameProfile().getName()).append(": ")
                     .append(op.getX()).append(' ').append(op.getY()).append(' ').append(op.getZ())
                     .append(", ").append(Math.round(e.distanceTo(o))).append(" м от тебя, здоровье ")
-                    .append(Math.round(o.getHealth())).append("/20\n");
+                    .append(Math.round(o.getHealth())).append("/" + Math.round(o.getMaxHealth()) + "\n");
         }
         List<Entity> near = lvl.getEntities(e, e.getBoundingBox().inflate(20), x -> x instanceof net.minecraft.world.entity.LivingEntity);
         near.sort(Comparator.comparingDouble(e::distanceTo));
@@ -644,7 +644,7 @@ public final class Actions {
         @Override
         protected boolean step(CompanionEntity e) {
             if (!target.isAlive()) {
-                complete(entityName(target) + " побеждён. Здоровье " + Math.round(e.getHealth()) + "/20.");
+                complete(entityName(target) + " побеждён. Здоровье " + Math.round(e.getHealth()) + "/" + Math.round(e.getMaxHealth()) + ".");
                 return true;
             }
             if (e.distanceTo(target) > 40) {
