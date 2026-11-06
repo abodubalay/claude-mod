@@ -1,0 +1,6 @@
+{
+  "drama":    { "sounds": [ { "name": "kino:drama", "stream": false } ] },
+  "boom":     { "sounds": [ "kino:boom" ] },
+  "applause": { "sounds": [ "kino:applause" ] },
+  "credits_music": { "sounds": [ { "name": "kino:credits_music", "stream": true } ] }
+}
