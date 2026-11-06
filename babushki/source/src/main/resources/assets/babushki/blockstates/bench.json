@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,part=left":  { "model": "babushki:block/bench" },
+    "facing=north,part=right": { "model": "babushki:block/bench" },
+    "facing=east,part=left":   { "model": "babushki:block/bench", "y": 90 },
+    "facing=east,part=right":  { "model": "babushki:block/bench", "y": 90 },
+    "facing=south,part=left":  { "model": "babushki:block/bench", "y": 180 },
+    "facing=south,part=right": { "model": "babushki:block/bench", "y": 180 },
+    "facing=west,part=left":   { "model": "babushki:block/bench", "y": 270 },
+    "facing=west,part=right":  { "model": "babushki:block/bench", "y": 270 }
+  }
+}

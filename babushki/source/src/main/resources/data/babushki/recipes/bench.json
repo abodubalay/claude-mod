@@ -1,0 +1,5 @@
+{ "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [ "SSS", "F F" ],
+  "key": { "S": {"tag": "minecraft:wooden_slabs"}, "F": {"item": "minecraft:stick"} },
+  "result": { "item": "babushki:bench", "count": 1 } }
