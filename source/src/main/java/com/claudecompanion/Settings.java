@@ -12,6 +12,8 @@ import java.util.List;
 /** Настройки мода: лежат в config/claudecompanion.json на компьютере того, кто держит мир. */
 public class Settings {
     public String apiKey = "";
+    /** Пусто = официальный api.anthropic.com. Иначе — адрес стороннего сервера, совместимого с Anthropic API. */
+    public String baseUrl = "";
     public String model = "claude-haiku-5-5";
     public String effort = "medium";
     /** all — отвечать на все сообщения хозяина, mention — только если есть имя бота */
@@ -46,6 +48,10 @@ public class Settings {
         } catch (Exception e) {
             ClaudeCompanion.LOG.error("Не удалось сохранить настройки", e);
         }
+    }
+
+    public boolean hasBaseUrl() {
+        return baseUrl != null && !baseUrl.isBlank();
     }
 
     public boolean hasKey() {

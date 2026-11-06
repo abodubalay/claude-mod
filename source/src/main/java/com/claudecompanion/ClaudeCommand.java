@@ -55,6 +55,9 @@ public final class ClaudeCommand {
                 .then(Commands.literal("key").requires(ClaudeCommand::isAdmin)
                         .executes(ClaudeCommand::keyStatus)
                         .then(Commands.argument("value", StringArgumentType.greedyString()).executes(ClaudeCommand::key)))
+                .then(Commands.literal("url").requires(ClaudeCommand::isAdmin)
+                        .executes(ClaudeCommand::urlStatus)
+                        .then(Commands.argument("address", StringArgumentType.greedyString()).executes(ClaudeCommand::url)))
                 .then(Commands.literal("skin").requires(ClaudeCommand::isAdmin).executes(ClaudeCommand::skin))
                 .then(Commands.literal("mode").requires(ClaudeCommand::isAdmin)
                         .then(Commands.literal("all").executes(c -> mode(c, "all")))
@@ -89,6 +92,7 @@ public final class ClaudeCommand {
                 /claude stop — остановить;  /claude dismiss — отпустить
                 /claude mode all|mention — отвечать на всё или только на «клод»
                 /claude skin — применить свой скин из config/claudecompanion/skin.png
+                /claude url https://... — сторонний сервер API (reset — официальный)
                 /claude model claude-haiku-5-5 — модель;  /claude effort low|medium|high
                 ПКМ по напарнику — его инвентарь. Пиши в чат как другу!""");
         return 1;
@@ -166,19 +170,28 @@ public final class ClaudeCommand {
         reply(src, "Проверяю ключ...");
         MinecraftServer server = src.getServer();
         String model = Settings.get().model;
+        String baseUrl = Settings.get().hasBaseUrl() ? Settings.get().baseUrl.trim() : "";
         Thread t = new Thread(() -> {
             String error = null;
             try {
-                AnthropicClient client = AnthropicOkHttpClient.builder().apiKey(v).build();
-                client.models().retrieve(model); // бесплатная проверка
+                var builder = AnthropicOkHttpClient.builder().apiKey(v);
+                if (!baseUrl.isEmpty()) builder.baseUrl(baseUrl);
+                AnthropicClient client = builder.build();
+                if (baseUrl.isEmpty()) {
+                    client.models().retrieve(model); // бесплатная проверка
+                } else {
+                    // сторонний сервер: проверяем коротким запросом (несколько токенов)
+                    client.messages().create(com.anthropic.models.messages.MessageCreateParams.builder()
+                            .model(model).maxTokens(16L).addUserMessage("ping").build());
+                }
             } catch (UnauthorizedException e) {
                 error = "ключ неверный или отозван";
             } catch (PermissionDeniedException e) {
                 error = "у ключа нет доступа";
             } catch (NotFoundException e) {
-                error = "модель " + model + " недоступна для этого ключа";
+                error = "модель " + model + " недоступна для этого ключа — смени её: /claude model <id>";
             } catch (AnthropicIoException e) {
-                error = "нет связи с api.anthropic.com";
+                error = "нет связи с " + (baseUrl.isEmpty() ? "api.anthropic.com" : baseUrl);
             } catch (Exception e) {
                 error = e.getMessage();
             }
@@ -195,6 +208,32 @@ public final class ClaudeCommand {
         }, "Claude-KeyCheck");
         t.setDaemon(true);
         t.start();
+        return 1;
+    }
+
+    private static int urlStatus(CommandContext<CommandSourceStack> c) {
+        Settings s = Settings.get();
+        reply(c.getSource(), s.hasBaseUrl() ? "Сервер API: " + s.baseUrl + " (вернуть официальный: /claude url reset)"
+                : "Сервер API: официальный api.anthropic.com");
+        return 1;
+    }
+
+    private static int url(CommandContext<CommandSourceStack> c) {
+        String v = StringArgumentType.getString(c, "address").trim();
+        if (v.equalsIgnoreCase("reset") || v.equalsIgnoreCase("default")) {
+            Settings.get().baseUrl = "";
+            Settings.save();
+            reply(c.getSource(), "Сервер API: официальный api.anthropic.com");
+            return 1;
+        }
+        if (!v.startsWith("https://") && !v.startsWith("http://")) {
+            reply(c.getSource(), "§cАдрес должен начинаться с https://");
+            return 0;
+        }
+        while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+        Settings.get().baseUrl = v;
+        Settings.save();
+        reply(c.getSource(), "§eСервер API: " + v + ". Запросы и чат с ботом теперь идут через этот сервер, а не напрямую в Anthropic. Теперь введи ключ: /claude key ...");
         return 1;
     }
 

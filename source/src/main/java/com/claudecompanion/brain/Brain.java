@@ -52,6 +52,7 @@ public class Brain {
     private volatile boolean closed = false;
     private AnthropicClient client;
     private String clientKey;
+    private String clientUrl;
 
     public Brain(MinecraftServer server, CompanionEntity entity) {
         this.server = server;
@@ -79,10 +80,15 @@ public class Brain {
     }
 
     private AnthropicClient client() {
-        String key = Settings.get().apiKey;
-        if (client == null || !Objects.equals(key, clientKey)) {
-            client = AnthropicOkHttpClient.builder().apiKey(key).build();
+        Settings cfg = Settings.get();
+        String key = cfg.apiKey;
+        String url = cfg.hasBaseUrl() ? cfg.baseUrl.trim() : "";
+        if (client == null || !Objects.equals(key, clientKey) || !Objects.equals(url, clientUrl)) {
+            var b = AnthropicOkHttpClient.builder().apiKey(key);
+            if (!url.isEmpty()) b.baseUrl(url);
+            client = b.build();
             clientKey = key;
+            clientUrl = url;
         }
         return client;
     }
