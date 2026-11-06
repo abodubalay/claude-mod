@@ -1,0 +1,6 @@
+{
+  "whale_song": {
+    "subtitle": "subtitles.kitsmotrit.whale_song",
+    "sounds": [ { "name": "kitsmotrit:whale_song", "attenuation_distance": 64 } ]
+  }
+}

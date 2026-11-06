@@ -1,0 +1,10 @@
+pluginManagement {
+    repositories {
+        // Forge maven проксирует Maven Central — используем его первым
+        maven {
+            name = 'MinecraftForge'
+            url = 'https://maven.minecraftforge.net/'
+        }
+        gradlePluginPortal()
+    }
+}
