@@ -41,8 +41,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** Напарник: моб в виде игрока, которым управляет Claude. */
+/** Напарник: моб в виде игрока, которым управляет нейросеть (Claude, DeepSeek, Grok...). */
 public class CompanionEntity extends PathfinderMob {
+    /** Какая нейросеть управляет напарником (id профиля из настроек). Синхронизируется с клиентом — для скина. */
+    private static final net.minecraft.network.syncher.EntityDataAccessor<String> PROFILE =
+            net.minecraft.network.syncher.SynchedEntityData.defineId(CompanionEntity.class,
+                    net.minecraft.network.syncher.EntityDataSerializers.STRING);
+
     public final SimpleContainer inventory = new SimpleContainer(36);
     public final List<String> memory = new ArrayList<>();
     public boolean guard = false;
@@ -61,6 +66,24 @@ public class CompanionEntity extends PathfinderMob {
             nav.setCanFloat(true);
         }
     }
+
+    @Override
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        entityData.define(PROFILE, "claude");
+    }
+
+    public String getProfileId() { return entityData.get(PROFILE); }
+
+    /** Назначить нейросеть: меняет id, имя и цвет ника. */
+    public void setProfile(String id) {
+        entityData.set(PROFILE, id);
+        var p = com.claudecompanion.Settings.get().profile(id);
+        net.minecraft.ChatFormatting color = net.minecraft.ChatFormatting.getByCode(p.color != null && !p.color.isEmpty() ? p.color.charAt(0) : '6');
+        setCustomName(Component.literal(p.name).withStyle(color == null ? net.minecraft.ChatFormatting.GOLD : color));
+    }
+
+    public String displayName() { return getName().getString(); }
 
     public static AttributeSupplier.Builder createAttributes() {
         return Mob.createMobAttributes()
@@ -194,7 +217,7 @@ public class CompanionEntity extends PathfinderMob {
         if (!level().isClientSide && isOwner(player) && player instanceof ServerPlayer sp) {
             sp.openMenu(new SimpleMenuProvider(
                     (id, inv, p) -> new ChestMenu(MenuType.GENERIC_9x4, id, inv, inventory, 4),
-                    Component.literal("Инвентарь Claude")));
+                    Component.literal("Инвентарь " + displayName())));
             return InteractionResult.SUCCESS;
         }
         return super.mobInteract(player, hand);
@@ -218,8 +241,8 @@ public class CompanionEntity extends PathfinderMob {
     public void die(DamageSource source) {
         if (!level().isClientSide) {
             ServerPlayer o = getOwnerPlayer();
-            if (o != null) o.sendSystemMessage(Component.literal("§cClaude погиб: " + source.getLocalizedDeathMessage(this).getString()
-                    + ". Его вещи выпали. Призови снова: /claude summon"));
+            if (o != null) o.sendSystemMessage(Component.literal("§c" + displayName() + " погиб: " + source.getLocalizedDeathMessage(this).getString()
+                    + ". Его вещи выпали. Призови снова: /claude summon " + getProfileId()));
             BrainManager.remove(this);
         }
         super.die(source);
@@ -253,6 +276,7 @@ public class CompanionEntity extends PathfinderMob {
         if (owner != null) tag.putUUID("Owner", owner);
         if (followTarget != null) tag.putUUID("Follow", followTarget);
         tag.putBoolean("Guard", guard);
+        tag.putString("Profile", getProfileId());
         ListTag mem = new ListTag();
         for (String m : memory) mem.add(StringTag.valueOf(m));
         tag.put("Memory", mem);
@@ -265,6 +289,7 @@ public class CompanionEntity extends PathfinderMob {
         owner = tag.hasUUID("Owner") ? tag.getUUID("Owner") : null;
         followTarget = tag.hasUUID("Follow") ? tag.getUUID("Follow") : null;
         guard = tag.getBoolean("Guard");
+        if (tag.contains("Profile")) setProfile(tag.getString("Profile"));
         memory.clear();
         ListTag mem = tag.getList("Memory", Tag.TAG_STRING);
         for (int i = 0; i < mem.size(); i++) memory.add(mem.getString(i));

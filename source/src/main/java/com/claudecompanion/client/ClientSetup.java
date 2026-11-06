@@ -35,7 +35,7 @@ public final class ClientSetup {
 
         @Override
         public ResourceLocation getTextureLocation(CompanionEntity entity) {
-            return ClientSkin.current();
+            return ClientSkin.forProfile(entity.getProfileId());
         }
     }
 }

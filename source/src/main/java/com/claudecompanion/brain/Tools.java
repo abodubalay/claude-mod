@@ -29,14 +29,29 @@ public final class Tools {
     private static Map<String, Object> strList(String d) { return Map.of("type", "array", "items", Map.of("type", "string"), "description", d); }
     private static Map<String, Object> oneOf(String d, String... values) { return Map.of("type", "string", "enum", List.of(values), "description", d); }
 
+    /** Те же инструменты в формате OpenAI (для других нейросетей): name, description, parameters. */
+    public static final List<Map<String, Object>> OPENAI_SPECS = new ArrayList<>();
+
     /** props: пары имя -> схема; все поля обязательные, лишних нет (strict). */
     private static Tool tool(String name, String description, Object... props) {
         Tool.InputSchema.Properties.Builder pb = Tool.InputSchema.Properties.builder();
         List<String> required = new ArrayList<>();
+        Map<String, Object> properties = new LinkedHashMap<>();
         for (int i = 0; i < props.length; i += 2) {
             pb.putAdditionalProperty((String) props[i], JsonValue.from(props[i + 1]));
             required.add((String) props[i]);
+            properties.put((String) props[i], props[i + 1]);
         }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "object");
+        params.put("properties", properties);
+        params.put("required", required);
+        params.put("additionalProperties", false);
+        Map<String, Object> fn = new LinkedHashMap<>();
+        fn.put("name", name);
+        fn.put("description", description);
+        fn.put("parameters", params);
+        OPENAI_SPECS.add(Map.of("type", "function", "function", fn));
         Tool.InputSchema schema = Tool.InputSchema.builder()
                 .properties(pb.build())
                 .required(required)
@@ -130,7 +145,7 @@ public final class Tools {
             case "say" -> {
                 String msg = s(in, "message");
                 if (msg.length() > 250) msg = msg.substring(0, 250);
-                server.getPlayerList().broadcastSystemMessage(Component.literal("<§6Claude§r> " + msg), false);
+                server.getPlayerList().broadcastSystemMessage(Brain.chatLine(e, msg), false);
                 return "Отправлено.";
             }
             case "get_status" -> { return Actions.status(e); }

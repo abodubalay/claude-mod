@@ -16,7 +16,8 @@ import java.util.regex.Pattern;
 
 public class GameEvents {
     private static final Pattern STOP = Pattern.compile("^(стоп|stop|хватит|стой|отмена|cancel)[!. ]*$", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-    private static final Pattern KEY = Pattern.compile("sk-ant-[A-Za-z0-9_-]{10,}");
+    /** Похоже на API-ключ (Anthropic, OpenAI, DeepSeek, xAI, Google, Groq...) */
+    private static final Pattern KEY = Pattern.compile("(sk-ant-[A-Za-z0-9_-]{10,}|sk-[A-Za-z0-9_-]{20,}|xai-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,})");
 
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent event) {
@@ -52,22 +53,32 @@ public class GameEvents {
         if (KEY.matcher(text).find()) {
             event.setCanceled(true);
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                    "§cНе пиши ключ в чат! Сообщение не отправлено. Используй команду: /claude key sk-ant-..."));
+                    "§cНе пиши ключ в чат! Сообщение не отправлено. Используй команду: /claude key <нейросеть> <ключ>"));
             return;
         }
 
         List<CompanionEntity> mine = BrainManager.ownedBy(player.getUUID());
         if (mine.isEmpty()) return; // слушаем только хозяина
 
-        if (STOP.matcher(text.trim()).matches()) {
-            mine.forEach(CompanionEntity::stopAll);
-        }
         Settings cfg = Settings.get();
-        if ("mention".equals(cfg.respondTo) && !STOP.matcher(text.trim()).matches()) {
-            String lower = text.toLowerCase(Locale.ROOT);
-            if (cfg.names.stream().noneMatch(n -> lower.contains(n.toLowerCase(Locale.ROOT)))) return;
+        String lower = text.toLowerCase(Locale.ROOT);
+        // кого назвали по имени: «дипсик, копай», «грок и клод, за мной»
+        List<CompanionEntity> named = new java.util.ArrayList<>();
+        for (CompanionEntity c : mine) {
+            Settings.Profile p = cfg.profile(c.getProfileId());
+            boolean hit = lower.contains(p.name.toLowerCase(Locale.ROOT))
+                    || p.names.stream().anyMatch(n -> !n.isBlank() && lower.contains(n.toLowerCase(Locale.ROOT)));
+            if (hit) named.add(c);
         }
+        boolean stop = STOP.matcher(text.replaceAll("(?iu)^[\\p{L}\\s,]*?[,:]\\s*", "").trim()).matches()
+                || STOP.matcher(text.trim()).matches();
+        List<CompanionEntity> targets;
+        if (!named.isEmpty()) targets = named;
+        else if ("all".equals(cfg.respondTo) || stop) targets = mine;
+        else return;
+
+        if (stop) targets.forEach(CompanionEntity::stopAll);
         String line = "<" + player.getGameProfile().getName() + "> " + text;
-        for (CompanionEntity c : mine) BrainManager.notify(c, line);
+        for (CompanionEntity c : targets) BrainManager.notify(c, line);
     }
 }

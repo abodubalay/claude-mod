@@ -1,0 +1,75 @@
+# Напарники-нейросети для Minecraft
+
+Мод для **Minecraft Java 1.20.1 + Forge 47+**. Добавляет в игру напарников, которыми управляют нейросети: **Claude, DeepSeek, Grok, ChatGPT, Gemini** или любая своя. Каждый откликается на своё имя, ходит за тобой, копает, крафтит (в том числе по рецептам модов), сражается, складывает вещи в сундуки и болтает в чате.
+
+## ⬇️ Скачать
+
+**[claudecompanion-1.20.1-forge-1.0.0.jar](https://github.com/abodubalay/claude-mod/raw/main/claudecompanion-1.20.1-forge-1.0.0.jar)** — нажми, и файл скачается.
+
+## Установка
+
+1. Положи `.jar` в папку `mods` своей сборки. Друзьям, которые заходят к тебе, — тоже.
+2. Зайди в мир (для игры с друзьями — «Открыть для сети»).
+3. Задай ключ нужной нейросети (команду и ключ видишь только ты):
+   `/claude key deepseek <ключ>`
+4. Призови: `/claude summon deepseek`
+5. Пиши в чат, обращаясь по имени: «дипсик, нарубите дерева», «грок, за мной», «клод, сделай кирку». «стоп» — остановить.
+
+## Нейросети
+
+| id | Имя в игре | Откликается на | Сервер по умолчанию | Модель по умолчанию |
+|---|---|---|---|---|
+| `claude` | Claude | клод, claude | api.anthropic.com | claude-haiku-5-5 |
+| `deepseek` | DeepSeek | дипсик, deepseek | https://api.deepseek.com/v1 | deepseek-chat |
+| `grok` | Grok | грок, grok | https://api.x.ai/v1 | grok-4 |
+| `chatgpt` | ChatGPT | чатгпт, гпт, chatgpt | https://api.openai.com/v1 | gpt-4o-mini |
+| `gemini` | Gemini | джемини, gemini | https://generativelanguage.googleapis.com/v1beta/openai | gemini-2.5-flash |
+
+Названия моделей у сервисов меняются — если ключ не принимается из-за модели, посмотри актуальное название на сайте сервиса и задай: `/claude model grok <модель>`.
+
+Если в сообщении никого не назвали — отвечают все напарники (`/claude mode mention` — тогда никто).
+
+**Своя нейросеть** (любой сервис в формате OpenAI: OpenRouter, Groq, Mistral, Ollama, LM Studio, посредники):
+
+```
+/claude new mistral Mistral
+/claude url mistral https://api.mistral.ai/v1
+/claude model mistral mistral-small-latest
+/claude key mistral <ключ>
+/claude summon mistral
+```
+
+Для нейросети на своём компьютере (Ollama: `http://localhost:11434/v1`) ключ можно задать словом `none`.
+
+## Команды
+
+| Команда | Что делает |
+|---|---|
+| `/claude` | справка |
+| `/claude key <нейросеть> <ключ>` | задать ключ (`remove` — удалить) |
+| `/claude summon <нейросеть>` | призвать (или позвать к себе) |
+| `/claude list` | все нейросети: ключ, сервер, модель, имена |
+| `/claude stop` | остановить всех |
+| `/claude dismiss [нейросеть]` | отпустить (вещи выпадут) |
+| `/claude url <нейросеть> https://...` | адрес сервера (`reset` — стандартный). Адрес со словом `anthropic` — формат Claude, иначе формат OpenAI |
+| `/claude model <нейросеть> <модель>` | модель |
+| `/claude names <нейросеть> имя1, имя2` | на что откликается |
+| `/claude new <id> <Имя>` | добавить свою нейросеть |
+| `/claude mode all\|mention` | если никого не назвали: отвечают все / никто |
+| `/claude effort low\|medium\|high` | насколько глубоко думает Claude |
+| `/claude skin` | применить свои скины |
+| ПКМ по напарнику | его инвентарь |
+
+## Свои скины
+
+Положи PNG 64×64 в `config/claudecompanion/skins/` с именем нейросети — `claude.png`, `deepseek.png`, `grok.png`… — и введи `/claude skin`. Скины увидят все игроки.
+
+## Важно
+
+- Напарники слушаются только того, кто их призвал. Призывать и задавать ключи может только хозяин мира.
+- Каждое действие — платный запрос к выбранной нейросети с ключа хозяина мира.
+- Если используешь посредника (сторонний сервер), все сообщения напарнику идут через него.
+
+## Исходники
+
+Папка [`source`](source) — проект Forge (Gradle). Сборка: `./gradlew build` (Java 17), готовый файл — `build/libs/claudecompanion-1.0.0-all.jar`.

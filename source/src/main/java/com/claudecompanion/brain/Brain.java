@@ -42,7 +42,7 @@ public class Brain {
     private final MinecraftServer server;
     private final CompanionEntity entity;
     private final ExecutorService thread = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "Claude-Brain");
+        Thread t = new Thread(r, "Companion-Brain");
         t.setDaemon(true);
         return t;
     });
@@ -79,8 +79,20 @@ public class Brain {
         thread.shutdownNow();
     }
 
+    /** Профиль нейросети этого напарника. */
+    private Settings.Profile profile() {
+        return Settings.get().profile(entity.getProfileId());
+    }
+
+    /** Строка чата от имени напарника: <Имя> текст, ник в цвете профиля. */
+    public static Component chatLine(CompanionEntity e, String text) {
+        Settings.Profile p = Settings.get().profile(e.getProfileId());
+        String color = p.color == null || p.color.isEmpty() ? "6" : p.color.substring(0, 1);
+        return Component.literal("<§" + color + e.displayName() + "§r> " + text);
+    }
+
     private AnthropicClient client() {
-        Settings cfg = Settings.get();
+        Settings.Profile cfg = profile();
         String key = cfg.apiKey;
         String url = cfg.hasBaseUrl() ? cfg.baseUrl.trim() : "";
         if (client == null || !Objects.equals(key, clientKey) || !Objects.equals(url, clientUrl)) {
@@ -96,26 +108,33 @@ public class Brain {
     private void runEpisodes() {
         try {
             while (!closed && !pending.isEmpty()) {
-                if (!Settings.get().hasKey()) {
+                if (!profile().hasKey()) {
                     pending.clear();
-                    tellOwner("§eУ Claude нет API-ключа. Введи: /claude key sk-ant-... (команду видишь только ты)");
+                    tellOwner("§eУ " + entity.displayName() + " нет API-ключа. Введи: /claude key " + entity.getProfileId() + " ... (команду видишь только ты)");
                     break;
                 }
                 try {
                     episode();
                 } catch (UnauthorizedException | PermissionDeniedException ex) {
                     pending.clear();
-                    tellOwner("§cAPI-ключ не работает. Введи новый: /claude key sk-ant-...");
+                    tellOwner("§cКлюч " + entity.displayName() + " не работает. Введи новый: /claude key " + entity.getProfileId() + " ...");
                 } catch (RateLimitException ex) {
                     pending.clear();
                     say("Слишком много запросов, дай мне минутку.");
-                } catch (AnthropicIoException ex) {
+                } catch (AnthropicIoException | java.io.IOException ex) {
                     pending.clear();
-                    say("Не могу связаться с Claude — проверь интернет.");
+                    say("Не могу связаться с нейросетью — проверь интернет и адрес (/claude url).");
+                } catch (OpenAiChat.ApiError ex) {
+                    pending.clear();
+                    ClaudeCompanion.LOG.error("Ошибка API", ex);
+                    if (ex.status == 401 || ex.status == 403) tellOwner("§cКлюч " + entity.displayName() + " не работает (" + ex.status + "). Введи новый: /claude key " + entity.getProfileId() + " ...");
+                    else if (ex.status == 429) say("Слишком много запросов, дай мне минутку.");
+                    else if (ex.status == 404) tellOwner("§cСервис не нашёл модель или адрес (404). Проверь: /claude list");
+                    else say("Нейросеть ответила ошибкой " + ex.status + ".");
                 } catch (InterruptedException ex) {
                     return;
                 } catch (Exception ex) {
-                    ClaudeCompanion.LOG.error("Ошибка мозга Claude", ex);
+                    ClaudeCompanion.LOG.error("Ошибка мозга напарника", ex);
                     pending.clear();
                     say("Мой мозг споткнулся: " + ex.getClass().getSimpleName());
                 }
@@ -164,15 +183,32 @@ public class Brain {
             return o == null ? "?" : o.getGameProfile().getName();
         });
 
-        String first = "Твоё имя: Claude (игроки зовут тебя и «Клод»). Твой хозяин: " + ownerName + ".\n\n"
+        Settings.Profile me = profile();
+        String team = onServer(() -> {
+            List<String> others = new ArrayList<>();
+            if (entity.getOwnerId() != null)
+                for (CompanionEntity o : BrainManager.ownedBy(entity.getOwnerId()))
+                    if (o != entity) others.add(o.displayName());
+            return others.isEmpty() ? "" : "Другие напарники рядом: " + String.join(", ", others)
+                    + ". Если сообщение обращено к ним по имени, а не к тебе, — не вмешивайся (просто закончи ход). "
+                    + "Если обращаются ко всем — договоритесь и не делайте одно и то же.\n";
+        });
+        String first = "Твоё имя: " + entity.displayName() + " (в чате тебя зовут: " + String.join(", ", me.names) + "). "
+                + "Ты работаешь на нейросети " + me.name + ". Твой хозяин: " + ownerName + ".\n" + team + "\n"
                 + "Твоя память:\n" + memory + "\n\n"
                 + "Недавний чат:\n" + (history.isBlank() ? "(нет)" : history) + "\n\n"
                 + "Текущее состояние:\n" + state + "\n\n"
                 + "Новое:\n" + String.join("\n", events);
 
+        Settings.Profile cfg = me;
+        String effort = Settings.get().effort;
+        if (cfg.isOpenAi()) {
+            episodeOpenAi(first, cfg);
+            return;
+        }
+
         List<MessageParam> messages = new ArrayList<>();
         messages.add(MessageParam.ofUser(first));
-        Settings cfg = Settings.get();
 
         for (int step = 0; step < 40 && !closed; step++) {
             MessageCreateParams.Builder b = MessageCreateParams.builder()
@@ -181,7 +217,7 @@ public class Brain {
                     .system(SYSTEM)
                     .messages(messages)
                     .thinking(ThinkingConfigAdaptive.builder().build())
-                    .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.of(cfg.effort)).build())
+                    .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.of(effort)).build())
                     .cacheControl(CacheControlEphemeral.builder().build());
             for (Tool t : Tools.DEFINITIONS) b.addTool(t);
 
@@ -238,8 +274,75 @@ public class Brain {
         }
     }
 
+    /** Тот же цикл «подумал → действие → результат», но для нейросетей в формате OpenAI. */
+    @SuppressWarnings("unchecked")
+    private void episodeOpenAi(String first, Settings.Profile cfg) throws Exception {
+        com.google.gson.JsonArray messages = new com.google.gson.JsonArray();
+        messages.add(OpenAiChat.msg("system", SYSTEM));
+        messages.add(OpenAiChat.msg("user", first));
+        com.google.gson.JsonArray tools = OpenAiChat.toolsJson();
+        com.google.gson.Gson gson = new com.google.gson.Gson();
+
+        for (int step = 0; step < 40 && !closed; step++) {
+            com.google.gson.JsonObject choice = OpenAiChat.complete(cfg.baseUrl, cfg.apiKey, cfg.model, messages, tools);
+            com.google.gson.JsonObject message = choice.getAsJsonObject("message");
+            String finish = choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()
+                    ? choice.get("finish_reason").getAsString() : "stop";
+            // ассистентский ответ кладём обратно как есть (без лишних полей, которые не все сервисы принимают)
+            com.google.gson.JsonObject assistant = new com.google.gson.JsonObject();
+            assistant.addProperty("role", "assistant");
+            assistant.add("content", message.has("content") ? message.get("content") : com.google.gson.JsonNull.INSTANCE);
+            com.google.gson.JsonArray calls = message.has("tool_calls") && message.get("tool_calls").isJsonArray()
+                    ? message.getAsJsonArray("tool_calls") : new com.google.gson.JsonArray();
+            if (!calls.isEmpty()) assistant.add("tool_calls", calls);
+            messages.add(assistant);
+
+            if (calls.isEmpty()) {
+                // модель ответила текстом без инструмента — если она не сказала это в чат, скажем за неё
+                if (message.has("content") && message.get("content").isJsonPrimitive()) {
+                    String text = message.get("content").getAsString().trim();
+                    if (!text.isEmpty() && step == 0) say(text.length() > 250 ? text.substring(0, 250) : text);
+                }
+                List<String> news = drain();
+                if (!news.isEmpty() && !"length".equals(finish)) {
+                    messages.add(OpenAiChat.msg("user", "Новые сообщения:\n" + String.join("\n", news)));
+                    continue;
+                }
+                return;
+            }
+
+            for (com.google.gson.JsonElement el : calls) {
+                com.google.gson.JsonObject call = el.getAsJsonObject();
+                com.google.gson.JsonObject fn = call.getAsJsonObject("function");
+                String name = fn.get("name").getAsString();
+                String result;
+                try {
+                    String args = fn.has("arguments") && !fn.get("arguments").isJsonNull() ? fn.get("arguments").getAsString() : "{}";
+                    Map<String, Object> input = args.isBlank() ? new HashMap<>() : gson.fromJson(args, Map.class);
+                    if (input == null) input = new HashMap<>();
+                    ClaudeCompanion.LOG.info("[AI] {} {}", name, input);
+                    result = Tools.run(server, entity, this, name, input).get(300, TimeUnit.SECONDS);
+                } catch (TimeoutException ex) {
+                    result = "Действие слишком долгое — прервано.";
+                    server.execute(entity::stopAll);
+                } catch (InterruptedException ex) {
+                    throw ex;
+                } catch (Exception ex) {
+                    result = "Ошибка: " + ex.getMessage();
+                }
+                com.google.gson.JsonObject toolMsg = new com.google.gson.JsonObject();
+                toolMsg.addProperty("role", "tool");
+                toolMsg.addProperty("tool_call_id", call.has("id") ? call.get("id").getAsString() : name);
+                toolMsg.addProperty("content", result);
+                messages.add(toolMsg);
+            }
+            List<String> news = drain();
+            if (!news.isEmpty()) messages.add(OpenAiChat.msg("user", "Новые сообщения/события:\n" + String.join("\n", news)));
+        }
+    }
+
     private void say(String text) {
-        server.execute(() -> server.getPlayerList().broadcastSystemMessage(Component.literal("<§6Claude§r> " + text), false));
+        server.execute(() -> server.getPlayerList().broadcastSystemMessage(chatLine(entity, text), false));
     }
 
     private void tellOwner(String text) {
