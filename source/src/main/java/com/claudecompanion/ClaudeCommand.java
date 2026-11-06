@@ -239,16 +239,17 @@ public final class ClaudeCommand {
                             .model(model).maxTokens(16L).addUserMessage("ping").build());
                 }
             } catch (UnauthorizedException e) {
-                error = "ключ неверный или отозван";
+                error = "ключ неверный или отозван" + why(e);
             } catch (PermissionDeniedException e) {
-                error = "у ключа нет доступа";
+                error = "нет доступа (часто — модель " + model + " не входит в тариф; смени: /claude model "
+                        + Settings.get().idOf(p) + " <модель>)" + why(e);
             } catch (NotFoundException e) {
-                error = "модель " + model + " недоступна — смени: /claude model " + Settings.get().idOf(p) + " <модель>";
+                error = "модель " + model + " недоступна — смени: /claude model " + Settings.get().idOf(p) + " <модель>" + why(e);
             } catch (OpenAiChat.ApiError e) {
                 error = switch (e.status) {
-                    case 401, 403 -> "ключ неверный или нет доступа";
+                    case 401, 403 -> "ключ неверный или нет доступа к модели " + model + ". " + e.getMessage();
                     case 402 -> "на счёте нет денег";
-                    case 404 -> "сервер не нашёл модель " + model + " или адрес неверный";
+                    case 404 -> "сервер не нашёл модель " + model + " или адрес неверный. " + e.getMessage();
                     case 429 -> "лимит запросов или кончились деньги";
                     default -> e.getMessage();
                 };
@@ -271,6 +272,14 @@ public final class ClaudeCommand {
         t.setDaemon(true);
         t.start();
         return 1;
+    }
+
+    /** Текст ответа сервера (коротко), чтобы было видно точную причину отказа. */
+    private static String why(Exception e) {
+        String m = e.getMessage();
+        if (m == null || m.isBlank()) return "";
+        m = m.replaceAll("\\s+", " ").trim();
+        return ". Сервер: " + (m.length() > 200 ? m.substring(0, 200) + "…" : m);
     }
 
     private static int url(CommandContext<CommandSourceStack> c) {
